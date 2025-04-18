@@ -1,0 +1,1 @@
+python -u legged_gym/scripts/train.py --task=go2_gait --headless --max_iterations=500

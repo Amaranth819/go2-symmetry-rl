@@ -82,7 +82,7 @@ class LeggedRobotCfg(BaseConfig):
         flip_visual_attachments = True # Some .obj meshes must be flipped from y-up to z-up
         
         density = 0.001
-        angular_damping = 0.
+        angular_damping = 0.4
         linear_damping = 0.
         max_angular_velocity = 1000.
         max_linear_velocity = 1000.
@@ -202,7 +202,7 @@ class LeggedRobotCfgPPO(BaseConfig):
         policy_class_name = 'ActorCritic'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 24 # per iteration
-        max_iterations = 1500 # number of policy updates
+        max_iterations = 500 # number of policy updates
 
         # logging
         save_interval = 50 # check for potential saves every this many iterations

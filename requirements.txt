@@ -1,0 +1,9 @@
+# isaacgym.egg==info
+matplotlib==3.7.5
+mujoco==3.2.3
+numpy==1.23.5
+PyYAML==6.0.2
+scipy==1.15.2
+setuptools==75.1.0
+torch==2.4.1
+unitree_sdk2py==1.0.1
