@@ -167,3 +167,5 @@ rsl_rl/
 *__pycache__/
 
 deprecated_scripts/
+
+nohup.out
