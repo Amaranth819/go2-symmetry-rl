@@ -8,7 +8,7 @@ import torch
 # Base class for RL tasks
 class BaseTask():
 
-    def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
+    def __init__(self, cfg, sim_params, physics_engine, sim_device, headless, record_video = False):
         self.gym = gymapi.acquire_gym()
 
         self.sim_params = sim_params
@@ -25,8 +25,10 @@ class BaseTask():
 
         # graphics device for rendering, -1 for no rendering
         self.graphics_device_id = self.sim_device_id
-        # if self.headless == True:
-        #     self.graphics_device_id = -1
+        if self.headless == True:
+            self.graphics_device_id = -1
+        if record_video == True:
+            self.graphics_device_id = self.sim_device_id
 
         self.num_envs = cfg.env.num_envs
         self.num_obs = cfg.env.num_observations

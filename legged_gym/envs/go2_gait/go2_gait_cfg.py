@@ -4,7 +4,7 @@ import numpy as np
 
 class Go2GaitCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        num_observations = 48 # if not base velocities # 54
+        num_observations = 52 # if not base velocities # 54
         episode_length_s = 20
         num_envs = 2048
     
@@ -91,7 +91,7 @@ class Go2GaitCfg(LeggedRobotCfg):
         c_stance_frc = 0
         c_stance_spd = -1
 
-        add_noise = False
+        add_noise = True
         noise_scale = 0.01
         noise_level = 10
 
@@ -104,9 +104,9 @@ class Go2GaitCfg(LeggedRobotCfg):
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
             lin_vel_x = [-2, 2] # [-2.0, 2.0] # min max [m/s]
-            lin_vel_y = [0, 0] # [-1, -1]   # min max [m/s]
-            ang_vel_yaw = [0, 0] # [-1, -1]    # min max [rad/s]
-            heading = [0, 0] # [-3.14, 3.14]
+            lin_vel_y = [-1, 1] # [-1, -1]   # min max [m/s]
+            ang_vel_yaw = [-1, 1] # [-1, -1]    # min max [rad/s]
+            heading = [-3.14, 3.14]
 
 
 
@@ -155,8 +155,8 @@ class Go2GaitCfgPPO( LeggedRobotCfgPPO ):
         # policy_class_name = 'ActorCriticRecurrent'
         run_name = ''
         experiment_name = 'gait_go2'
-        save_interval = 250
-        max_iterations = 500
+        save_interval = 1000
+        max_iterations = 1500
     # class policy(LeggedRobotCfgPPO.policy):
         # activation = 'relu'
         # rnn_type = 'lstm'

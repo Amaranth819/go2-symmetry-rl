@@ -20,12 +20,12 @@ from collections import defaultdict, deque
 
 CAMERA_WIDTH, CAMERA_HEIGHT = 640, 480
 MAX_VIDEO_LENGTH = 1000
-VIDEO_FPS = 30
+VIDEO_FPS = 120
 
 
 class Go2GaitEnv(LeggedRobot):
-    def __init__(self, cfg : Go2GaitCfg, sim_params, physics_engine, sim_device, headless):
-        super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+    def __init__(self, cfg : Go2GaitCfg, sim_params, physics_engine, sim_device, headless, record_video):
+        super().__init__(cfg, sim_params, physics_engine, sim_device, headless, record_video)
         # if self.headless:
         #     camera_position = gymapi.Vec3(-0.5 + self.env_origins[self.cam_env_id, 0], 0.5 + self.env_origins[self.cam_env_id, 1], 1 + self.env_origins[self.cam_env_id, 2])
         #     camera_target = gymapi.Vec3(0.5 + self.env_origins[self.cam_env_id, 0], 0. + self.env_origins[self.cam_env_id, 1], 0.5 + self.env_origins[self.cam_env_id, 2])
@@ -35,8 +35,9 @@ class Go2GaitEnv(LeggedRobot):
 
 
         self.cameras = {}
-        self.camera_tensors = []
+        self.camera_tensors = {}
         self.camera_frames = defaultdict(lambda: deque(maxlen = MAX_VIDEO_LENGTH))
+        self.camera_text_infos = defaultdict(lambda: deque(maxlen = MAX_VIDEO_LENGTH)) # Add some text to the video
 
         self.episode_times = torch.zeros_like(self.episode_length_buf, dtype = torch.float)
 
@@ -155,6 +156,29 @@ class Go2GaitEnv(LeggedRobot):
         self.E_C_frc, self.E_C_spd = self._compute_E_C()
 
 
+    def _reset_foot_periodicity_manually(self, fwd_vel_cmd, lateral_vel_cmd, yaw_vel_cmd, foot_thetas, duty_factor, gait_period, calculate_from_slip_model = True):
+        foot_periodicity_cfg = self.cfg.foot_periodicity
+        self.kappa[:] = foot_periodicity_cfg.kappa
+        self.foot_thetas[:, :] = torch.as_tensor(foot_thetas, dtype = torch.float, device = self.device).unsqueeze(0)
+        self.commands[:, 0] = fwd_vel_cmd
+        self.commands[:, 1] = lateral_vel_cmd
+        self.commands[:, 2] = yaw_vel_cmd
+
+        if calculate_from_slip_model:
+            # Reset the parameters to the values calculated from the SLIP model.
+            self.duty_factors[:] = self._compute_duty_factor_from_cmd_forward_linvel(self.commands[:, 0])
+            self.gait_periods[:] = self._compute_period_from_cmd_forward_linvel(self.commands[:, 0])
+            self.gait_period_steps[:] = self._compute_period_from_cmd_forward_linvel(self.commands[:, 0]) / self.dt
+        else:
+            # Reset the parameters to the values in the configuration file.
+            self.duty_factors[:] = duty_factor
+            self.gait_periods[:] = gait_period
+            self.gait_period_steps[:] = gait_period / self.dt
+
+        self.E_C_frc, self.E_C_spd = self._compute_E_C()
+
+
+
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
             return
@@ -214,6 +238,8 @@ class Go2GaitEnv(LeggedRobot):
     def compute_observations(self):
         # num_feet: 4
         foot_phis_sin = torch.sin(2 * torch.pi * self._get_foot_phis())
+
+        foot_thetas = self.foot_thetas
                               
         # phase ratios: 2
         phase_ratios = torch.stack([
@@ -231,6 +257,7 @@ class Go2GaitEnv(LeggedRobot):
             self.dof_vel * self.obs_scales.dof_vel,
             self.actions,
             foot_phis_sin,    
+            foot_thetas,
             phase_ratios,
         ], dim = -1)    
 
@@ -286,16 +313,17 @@ class Go2GaitEnv(LeggedRobot):
     
 
     def _reward_smoothness(self):
-        # torque = torch.sum(torch.abs(self.torques), dim = -1)
-        # R_torque = 1 - torch.exp(-0.02 * torque)
-
         torque_diff = torch.sum(torch.abs(self.torques - self.last_torques), dim = -1)
-        R_torque = 1 - torch.exp(-0.1 * torque_diff)
+        R_torque_diff = 1 - torch.exp(-0.1 * torque_diff)
 
-        # action_diff = torch.sum(torch.abs(self.actions - self.last_actions), dim = -1)
-        # R_action_diff = 1 - torch.exp(-2 * action_diff)
+        # torque_total = torch.sum(torch.abs(self.torques), dim = -1)
+        # R_torque_total = 1 - torch.exp(-0.025 * torque_total)
 
-        return -(R_torque)
+        hip_jpos = torch.clamp(torch.abs(self.dof_pos[..., [0, 3, 6, 9]]) - 0.1, min = 0)
+        lateral_cmd_vel = torch.abs(self.commands[..., 1]) < 0.02
+        R_hip_jpos = 1 - torch.exp(-3 * torch.sum(hip_jpos * lateral_cmd_vel.unsqueeze(-1), dim = -1)) 
+
+        return -(R_torque_diff + R_hip_jpos)
     
 
     def _reward_pitching(self):
@@ -307,8 +335,9 @@ class Go2GaitEnv(LeggedRobot):
         # R_base_height_diff = 1 - torch.exp(-4 * base_height_diff)
         # return -R_base_height_diff
 
+        # base_pitch_angle = torch.clamp(torch.abs(self.rpy[..., 1]) - 0.314, min = 0)
         base_pitch_angle = torch.abs(self.rpy[..., 1])
-        R_pitching_angle = 1 - torch.exp(-4 * base_pitch_angle)
+        R_pitching_angle = 1 - torch.exp(-2 * base_pitch_angle)
         return -(R_pitching_angle)
     
 
@@ -405,16 +434,21 @@ class Go2GaitEnv(LeggedRobot):
         self.cameras[camera_idx] = env_idx
         camera_ts = self.gym.get_camera_image_gpu_tensor(self.sim, self.envs[env_idx], camera_idx, gymapi.IMAGE_COLOR) # IMAGE_COLOR - 4x 8 bit unsigned int - RGBA color
         camera_ts = gymtorch.wrap_tensor(camera_ts)
-        self.camera_tensors.append(camera_ts)
+        self.camera_tensors[camera_idx] = camera_ts
 
 
     def _render_cameras(self):
         if len(self.cameras) > 0:
             self.gym.render_all_camera_sensors(self.sim)
             self.gym.start_access_image_tensors(self.sim)
-            for idx in range(len(self.camera_tensors)):
-                self.camera_frames[idx].append(self.camera_tensors[idx].cpu().numpy())
+            for camera_idx in self.camera_tensors.keys():
+                self.camera_frames[camera_idx].append(self.camera_tensors[camera_idx].cpu().numpy())
             self.gym.end_access_image_tensors(self.sim)
+
+            for camera_idx, env_idx in self.cameras.items():
+                self.camera_text_infos['v_x_cmd'].append(self.commands[env_idx, 0].cpu().numpy())
+                self.camera_text_infos['v_x_true'].append(self.base_lin_vel[env_idx, 0].cpu().numpy())
+                self.camera_text_infos['foot_thetas'].append(self.foot_thetas[env_idx].cpu().numpy())
 
 
     def render(self, sync_frame_time=True):
@@ -446,19 +480,23 @@ class Go2GaitEnv(LeggedRobot):
                 self.gym.poll_viewer_events(self.viewer)
 
 
-    def save_record_video(self, name = 'video', postfix = 'mp4'):
+    def save_record_video(self, name = 'video', ext = 'mp4', add_text = False):
         if len(self.camera_frames) > 0:
-            assert postfix in ['gif', 'mp4']
-            import imageio
-            import cv2
+            assert ext in ['gif', 'mp4']
             
-            for idx, video_frames in self.camera_frames.items():
-                video_path = f'{name}_env{idx}.{postfix}'
-                if postfix == 'gif':
-                    with imageio.get_writer(video_path, mode = 'I', duration = 1 / VIDEO_FPS) as writer:
-                        for frame in video_frames:
+            for camera_idx, video_frames in self.camera_frames.items():
+                video_path = f'{name}_camera{camera_idx}.{ext}'
+                if ext == 'gif':
+                    import imageio
+                    with imageio.get_writer(video_path, mode = 'I', fps = VIDEO_FPS) as writer:
+                        for idx, frame in enumerate(video_frames):
+                            # if add_text:
+                            #     text = f"v_x_cmd = {self.camera_text_infos['v_x_cmd'][idx]:.2f} m/s\nv_x_true = {self.camera_text_infos['nv_x_true'][idx]:.2f} m/s"
+                            #     position = (50, 50)  # (x, y) coordinates
+                                
                             writer.append_data(frame)
-                elif postfix == 'mp4':
+                elif ext == 'mp4':
+                    import cv2
                     video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), VIDEO_FPS, (CAMERA_WIDTH, CAMERA_HEIGHT), True) # 
                     for frame in video_frames:
                         video.write(frame[..., :-1])

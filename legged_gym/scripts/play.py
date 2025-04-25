@@ -14,11 +14,13 @@ import torch
 
 
 def play(args):
+    args.record_video = False
+    args.headless = False
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 16)
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 5
+    env_cfg.terrain.num_rows = 4
+    env_cfg.terrain.num_cols = 4
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
@@ -51,12 +53,6 @@ def play(args):
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
 
-        # print(env._get_contact_forces([3, 7, 13, 17]))
-        # print(torch.sum(torch.abs(env.torques), dim = -1))
-        # print(torch.norm(env.foot_velocities, dim = -1))
-        # print(torch.norm(env.rigid_body_state[:, env.feet_indices, 7:10], dim = -1))
-        # print(env.E_C_spd[:, 0])
-
         total_rews += rews
         total_steps += 1
         env_ids = dones.nonzero(as_tuple=False).flatten()
@@ -65,22 +61,7 @@ def play(args):
             total_rews[i] = 0
             total_steps[i] = 0
 
-        # E_C_frcs.append(env.E_C_frc.clone())
-        # E_C_spds.append(env.E_C_spd.clone())
-
-    env.save_record_video()
-
-    # E_C_frcs = torch.cat(E_C_frcs).cpu().numpy()
-    # start_idx = 0
-    # end_idx = 150 # E_C_frcs.shape[0]
-    # foot_seq = ['FL', 'FR', 'RL', 'RR']
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize = (24, 4))
-    # for i, ft in enumerate(foot_seq):
-    #     plt.plot(np.arange(start_idx, end_idx), E_C_frcs[start_idx:end_idx, i], label = ft)
-    # plt.legend()
-    # plt.savefig('E_C_frcs.png')
-    # plt.close()
+    env.save_record_video(ext = 'gif')
 
 
 

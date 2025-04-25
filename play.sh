@@ -1,1 +1,1 @@
-python legged_gym/scripts/play.py --task=go2_gait --headless # --load_run='Apr05_23-25-19_' --checkpoint=500 # --headless
+python legged_gym/scripts/play.py --task=go2_gait # --load_run='Apr05_23-25-19_' --checkpoint=500 # --headless
